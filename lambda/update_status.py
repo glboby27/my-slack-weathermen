@@ -47,33 +47,47 @@ def _pick_hour_index(times, target):
     return best_i
 
 def _decide_emoji_text(now, mode):
+    print(f"🌐 Open-Meteo API 호출 중... (위도: {CITY_LAT}, 경도: {CITY_LON})")
     data = _fetch_nowcast()
     hourly = data["hourly"]
     times = hourly["time"]
     idx = _pick_hour_index(times, now)
+    print(f"📅 시간 인덱스: {idx} (총 {len(times)}개 시간대)")
 
     precip = hourly.get("precipitation", [0])[idx] or 0
     snow   = hourly.get("snowfall", [0])[idx] or 0
     cover  = hourly.get("cloudcover", [0])[idx] or 0
     wcode  = hourly.get("weathercode", [0])[idx] or 0
+    
+    print(f"🌧️ 강수량: {precip}mm")
+    print(f"❄️ 적설량: {snow}mm") 
+    print(f"☁️ 구름량: {cover}%")
+    print(f"🌤️ 날씨코드: {wcode}")
 
     # 강수 우선
     if snow and snow > 0:
+        print("❄️ 눈 감지 - 눈 이모지 선택")
         return ":snowflake:", "눈"
     if precip and precip > 0:
-        # 간단 구분
+        print("🌧️ 비 감지 - 비 이모지 선택")
         return ":rain_cloud:", "비"
 
     # 흐림/구름
     if cover >= 80:
+        print("☁️ 구름 80% 이상 - 흐림 이모지 선택")
         return ":cloud:", "흐림"
     if cover >= 40:
         if mode in ("sunset", "night"):
+            print("⛅ 구름 40% 이상 + 야간모드 - 구름 많음 이모지 선택")
             return ":partly_sunny:", "구름 많음"
+        print("⛅ 구름 40% 이상 + 주간모드 - 구름 조금 이모지 선택")
         return ":partly_sunny:", "구름 조금"
-    # 맑음 or 야간 (달 위상 기능 비활성화)
+    
+    # 맑음 or 야간
     if mode == "sunset" or (now.hour >= 18 or now.hour < 6):
+        print("🌙 맑음 + 야간모드 - 달 이모지 선택")
         return ":crescent_moon:", "맑은 밤"
+    print("☀️ 맑음 + 주간모드 - 태양 이모지 선택")
     return ":sunny:", "맑음"
 
 def _moon_emoji_text(now):
@@ -123,32 +137,71 @@ def _slack_set_status(token, emoji, text):
     return r.status_code, r.text
 
 def handler(event, context):
+    # 상세 로깅 시작
+    print("=" * 60)
+    print(f"🚀 UpdateStatus Lambda 시작 - {dt.datetime.now(tz).isoformat()}")
+    print(f"📥 입력 이벤트: {json.dumps(event, ensure_ascii=False)}")
+    print(f"🆔 Request ID: {context.aws_request_id}")
+    
     mode = (event.get("mode") or event.get("trigger") or "").lower()
-    # sunset 모드 구분을 위해 야간 판단
     now = dt.datetime.now(tz)
+    print(f"⏰ 현재 시간: {now.isoformat()} (KST)")
+    print(f"🎯 원본 모드: {event.get('mode', 'None')} / {event.get('trigger', 'None')}")
+    
+    # sunset 모드 구분을 위해 야간 판단
     if not mode:
         if 6 <= now.hour < 12: mode = "sunrise"
         elif 12 <= now.hour < 18: mode = "noon"
         else: mode = "sunset"
-
+    
+    print(f"🔍 최종 모드: {mode} (시간 기반 자동 결정: {now.hour}시)")
+    
+    print("🌤️ 날씨 데이터 조회 시작...")
     emoji, text = _decide_emoji_text(now, mode)
+    print(f"📊 날씨 분석 결과: {emoji} {text}")
+    
     status_hash = _hash_status(emoji, text)
+    print(f"🔐 상태 해시: {status_hash[:16]}...")
+    
+    print("💾 이전 상태 해시 조회...")
     last_hash = ""
     try:
         last_hash = _get_ssm(PARAM_LAST_HASH_PATH, with_decrypt=False) or ""
-    except Exception:
+        print(f"📋 이전 해시: {last_hash[:16] if last_hash else 'None'}...")
+    except Exception as e:
+        print(f"⚠️ 이전 해시 조회 실패: {e}")
         pass
 
     if last_hash == status_hash:
-        return {"ok": True, "skipped": True, "emoji": emoji, "text": text}
+        print("⏭️ 상태 변경 없음 - 스킵")
+        result = {"ok": True, "skipped": True, "emoji": emoji, "text": text}
+        print(f"📤 응답: {json.dumps(result, ensure_ascii=False)}")
+        return result
 
     if DRY_RUN:
+        print("🧪 DRY RUN 모드 - 실제 Slack 호출 생략")
         _put_ssm(PARAM_LAST_HASH_PATH, status_hash)
-        return {"ok": True, "dry_run": True, "emoji": emoji, "text": text}
+        result = {"ok": True, "dry_run": True, "emoji": emoji, "text": text}
+        print(f"📤 응답: {json.dumps(result, ensure_ascii=False)}")
+        return result
 
+    print("🔑 Slack 토큰 조회...")
     token = _get_ssm(PARAM_SLACK_TOKEN_PATH, with_decrypt=True)
+    print(f"🎫 토큰 길이: {len(token)} 문자")
+    
+    print("📡 Slack API 호출 시작...")
     code, body = _slack_set_status(token, emoji, text)
+    print(f"📊 Slack 응답: {code} - {body[:100]}{'...' if len(body) > 100 else ''}")
+    
     if code == 200:
+        print("✅ Slack 상태 업데이트 성공")
         _put_ssm(PARAM_LAST_HASH_PATH, status_hash)
-        return {"ok": True, "emoji": emoji, "text": text}
-    return {"ok": False, "code": code, "body": body}
+        print("💾 상태 해시 저장 완료")
+        result = {"ok": True, "emoji": emoji, "text": text}
+        print(f"📤 응답: {json.dumps(result, ensure_ascii=False)}")
+        return result
+    else:
+        print(f"❌ Slack API 오류: {code}")
+        result = {"ok": False, "code": code, "body": body}
+        print(f"📤 응답: {json.dumps(result, ensure_ascii=False)}")
+        return result
