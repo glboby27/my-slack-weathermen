@@ -15,12 +15,16 @@ lambda_client = boto3.client("lambda")
 WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL")
 
 def _notify_slack(text: str):
+    print(f"DEBUG: Slack 알림 시도 - Webhook URL: {WEBHOOK_URL}")
     if not WEBHOOK_URL:
+        print("DEBUG: Webhook URL이 없어서 Slack 알림 스킵")
         return
     try:
-        requests.post(WEBHOOK_URL, json={"text": text}, timeout=5)
-    except Exception:
-        pass
+        print(f"DEBUG: Slack 메시지 전송 중: {text[:100]}...")
+        response = requests.post(WEBHOOK_URL, json={"text": text}, timeout=5)
+        print(f"DEBUG: Slack 응답 - Status: {response.status_code}, Body: {response.text}")
+    except Exception as e:
+        print(f"DEBUG: Slack 알림 실패 - Error: {e}")
 
 def _fetch_astronomy():
     url = (
@@ -148,12 +152,14 @@ def handler(event, context):
         noon_txt    = noon.strftime("%Y-%m-%d %H:%M KST")
         sunset_txt  = sunset.strftime("%Y-%m-%d %H:%M KST")
         msg_parts = [
-            f"🌅 sunrise: {sunrise_txt} - {'skipped' if isinstance(res_sr, dict) and res_sr.get('skipped') else 'scheduled'}",
-            f"🕛 noon: {noon_txt} - {'skipped' if isinstance(res_nn, dict) and res_nn.get('skipped') else 'scheduled'}",
-            f"🌇 sunset: {sunset_txt} - {'skipped' if isinstance(res_ss, dict) and res_ss.get('skipped') else 'scheduled'}",
+            f"sunrise: {sunrise_txt} - {'skipped' if isinstance(res_sr, dict) and res_sr.get('skipped') else 'scheduled'}",
+            f"noon: {noon_txt} - {'skipped' if isinstance(res_nn, dict) and res_nn.get('skipped') else 'scheduled'}",
+            f"sunset: {sunset_txt} - {'skipped' if isinstance(res_ss, dict) and res_ss.get('skipped') else 'scheduled'}",
         ]
-        _notify_slack("[DailyPlanner] 원타임 스케줄 생성\n" + "\n".join(msg_parts))
-    except Exception:
-        pass
+        full_message = "[DailyPlanner] 원타임 스케줄 생성\n" + "\n".join(msg_parts)
+        print(f"DEBUG: 전체 Slack 메시지: {full_message}")
+        _notify_slack(full_message)
+    except Exception as e:
+        print(f"DEBUG: Slack 알림 생성 실패 - Error: {e}")
 
     return {"ok": True, "sunrise": sunrise.isoformat(), "noon": noon.isoformat(), "sunset": sunset.isoformat(), "schedules": len(created)}
