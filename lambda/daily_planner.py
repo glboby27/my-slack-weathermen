@@ -12,6 +12,15 @@ DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
 
 scheduler = boto3.client("scheduler")
 lambda_client = boto3.client("lambda")
+WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL")
+
+def _notify_slack(text: str):
+    if not WEBHOOK_URL:
+        return
+    try:
+        requests.post(WEBHOOK_URL, json={"text": text}, timeout=5)
+    except Exception:
+        pass
 
 def _fetch_astronomy():
     url = (
@@ -23,7 +32,17 @@ def _fetch_astronomy():
     r = requests.get(url, timeout=8)
     r.raise_for_status()
     js = r.json()
-    return js["daily"]["sunrise"][0], js["daily"]["sunset"][0]
+    
+    # 오늘 날짜 찾기
+    today = dt.date.today().isoformat()
+    time_list = js["daily"]["time"]
+    
+    try:
+        today_index = time_list.index(today)
+        return js["daily"]["sunrise"][today_index], js["daily"]["sunset"][today_index]
+    except ValueError:
+        # 오늘 날짜가 없으면 첫 번째 사용
+        return js["daily"]["sunrise"][0], js["daily"]["sunset"][0]
 
 def _to_kst_datetime(iso_str):
     # Open-Meteo 반환은 타임존 포함 ISO
@@ -110,8 +129,23 @@ def handler(event, context):
     # 2) 일출, 정오, 일몰 스케줄 생성
     date_tag = today.strftime("%Y%m%d")
     created = []
-    created.append(_create_one_time(f"update-sunrise-{date_tag}", _iso_minute_zero(sunrise), "sunrise"))
-    created.append(_create_one_time(f"update-noon-{date_tag}",    _iso_minute_zero(noon),    "noon"))
-    created.append(_create_one_time(f"update-sunset-{date_tag}",  _iso_minute_zero(sunset),  "sunset"))
+    res_sr = _create_one_time(f"update-sunrise-{date_tag}", _iso_minute_zero(sunrise), "sunrise")
+    res_nn = _create_one_time(f"update-noon-{date_tag}",    _iso_minute_zero(noon),    "noon")
+    res_ss = _create_one_time(f"update-sunset-{date_tag}",  _iso_minute_zero(sunset),  "sunset")
+    created.extend([res_sr, res_nn, res_ss])
+
+    # Slack 알림 (요약)
+    try:
+        sunrise_txt = sunrise.strftime("%Y-%m-%d %H:%M KST")
+        noon_txt    = noon.strftime("%Y-%m-%d %H:%M KST")
+        sunset_txt  = sunset.strftime("%Y-%m-%d %H:%M KST")
+        msg_parts = [
+            f"🌅 sunrise: {sunrise_txt} - {'skipped' if isinstance(res_sr, dict) and res_sr.get('skipped') else 'scheduled'}",
+            f"🕛 noon: {noon_txt} - {'skipped' if isinstance(res_nn, dict) and res_nn.get('skipped') else 'scheduled'}",
+            f"🌇 sunset: {sunset_txt} - {'skipped' if isinstance(res_ss, dict) and res_ss.get('skipped') else 'scheduled'}",
+        ]
+        _notify_slack("[DailyPlanner] 원타임 스케줄 생성\n" + "\n".join(msg_parts))
+    except Exception:
+        pass
 
     return {"ok": True, "sunrise": sunrise.isoformat(), "noon": noon.isoformat(), "sunset": sunset.isoformat(), "schedules": len(created)}

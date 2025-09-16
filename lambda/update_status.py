@@ -11,6 +11,15 @@ CITY_LON = os.environ["CITY_LON"]
 DRY_RUN  = os.environ.get("DRY_RUN", "false").lower() == "true"
 
 ssm = boto3.client("ssm")
+WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL")
+
+def _notify_slack(text: str):
+    if not WEBHOOK_URL:
+        return
+    try:
+        requests.post(WEBHOOK_URL, json={"text": text}, timeout=5)
+    except Exception:
+        pass
 
 def _get_ssm(name, with_decrypt=False):
     return ssm.get_parameter(Name=name, WithDecryption=with_decrypt)["Parameter"]["Value"]
@@ -175,6 +184,10 @@ def handler(event, context):
     if last_hash == status_hash:
         print("⏭️ 상태 변경 없음 - 스킵")
         result = {"ok": True, "skipped": True, "emoji": emoji, "text": text}
+        try:
+            _notify_slack(f"[UpdateStatus] {mode} 스킵: {emoji} {text}")
+        except Exception:
+            pass
         print(f"📤 응답: {json.dumps(result, ensure_ascii=False)}")
         return result
 
@@ -198,10 +211,18 @@ def handler(event, context):
         _put_ssm(PARAM_LAST_HASH_PATH, status_hash)
         print("💾 상태 해시 저장 완료")
         result = {"ok": True, "emoji": emoji, "text": text}
+        try:
+            _notify_slack(f"[UpdateStatus] {mode} 완료: {emoji} {text}")
+        except Exception:
+            pass
         print(f"📤 응답: {json.dumps(result, ensure_ascii=False)}")
         return result
     else:
         print(f"❌ Slack API 오류: {code}")
         result = {"ok": False, "code": code, "body": body}
+        try:
+            _notify_slack(f"[UpdateStatus] {mode} 실패: code={code}")
+        except Exception:
+            pass
         print(f"📤 응답: {json.dumps(result, ensure_ascii=False)}")
         return result
