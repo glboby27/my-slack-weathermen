@@ -33,15 +33,23 @@ def _fetch_astronomy():
     r.raise_for_status()
     js = r.json()
     
-    # 오늘 날짜 찾기
-    today = dt.date.today().isoformat()
+    # 오늘 날짜 찾기 (KST 기준)
+    today_kst = dt.datetime.now(tz).date().isoformat()
     time_list = js["daily"]["time"]
+    print(f"DEBUG: 오늘 날짜 (KST): {today_kst}")
+    print(f"DEBUG: API 날짜 목록: {time_list}")
     
     try:
-        today_index = time_list.index(today)
-        return js["daily"]["sunrise"][today_index], js["daily"]["sunset"][today_index]
+        today_index = time_list.index(today_kst)
+        print(f"DEBUG: 오늘 인덱스: {today_index}")
+        sunrise_raw = js["daily"]["sunrise"][today_index]
+        sunset_raw = js["daily"]["sunset"][today_index]
+        print(f"DEBUG: 오늘 sunrise raw: {sunrise_raw}")
+        print(f"DEBUG: 오늘 sunset raw: {sunset_raw}")
+        return sunrise_raw, sunset_raw
     except ValueError:
         # 오늘 날짜가 없으면 첫 번째 사용
+        print(f"DEBUG: 오늘 날짜를 찾을 수 없음, 첫 번째 사용")
         return js["daily"]["sunrise"][0], js["daily"]["sunset"][0]
 
 def _to_kst_datetime(iso_str):
