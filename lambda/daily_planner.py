@@ -18,7 +18,7 @@ def _fetch_astronomy():
         "https://api.open-meteo.com/v1/forecast"
         f"?latitude={CITY_LAT}&longitude={CITY_LON}"
         "&daily=sunrise,sunset"
-        "&timezone=Asia/Seoul"
+        "&timezone=UTC"
     )
     r = requests.get(url, timeout=8)
     r.raise_for_status()
