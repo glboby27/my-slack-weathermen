@@ -87,8 +87,8 @@ def _decide_emoji_text(now, mode):
         return ":cloud:", "흐림"
     if cover >= 40:
         if mode in ("sunset", "night"):
-            print("⛅ 구름 40% 이상 + 야간모드 - 구름 많음 이모지 선택")
-            return ":partly_sunny:", "구름 많음"
+            print("☁️ 구름 40% 이상 + 야간모드 - 구름 많음(야간) 이모지 선택")
+            return ":cloud:", "구름 많음"
         print("⛅ 구름 40% 이상 + 주간모드 - 구름 조금 이모지 선택")
         return ":partly_sunny:", "구름 조금"
     
